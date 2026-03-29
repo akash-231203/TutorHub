@@ -1,0 +1,171 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    // Disallow anonymous sign-in usage in rules
+    function isAuthenticatedNonAnonymous() {
+      return request.auth != null
+        && !(request.auth.token.firebase != null && request.auth.token.firebase.sign_in_provider == 'anonymous');
+    }
+
+    match /users/{userId} {
+      // Allow reading tutor profiles publicly (for browsing)
+      allow read: if resource.data.role == "tutor";
+      // Allow authenticated users to read basic user info (name, role) for users they interact with
+      // This is needed for displaying names in session requests and video calls
+      allow get: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+      // Only authenticated users can rate tutors
+      allow update: if request.auth != null
+                    && !(request.resource.data.diff(resource.data).affectedKeys()
+                        .hasAny(['role', 'email', 'name'])) // restrict to rating fields only
+                    && request.resource.data.ratingSum is number
+                    && request.resource.data.ratingCount is number
+                    && request.resource.data.ratingAvg is number;
+    }
+
+    match /questions/{questionId} {
+      // Only non-anonymous signed-in users can read or write questions
+      allow read: if isAuthenticatedNonAnonymous();
+      allow write: if isAuthenticatedNonAnonymous();
+      // Only the creator can delete their question + its subcollection
+      allow delete: if isAuthenticatedNonAnonymous()
+                    && resource.data.studentId == request.auth.uid;
+
+      // Allow updates if the owner modifies non-restricted fields
+      allow update: if isAuthenticatedNonAnonymous()
+                    && resource.data.studentId == request.auth.uid;
+
+      // Solutions subcollection
+      match /solutions/{_} {
+        // Tutors can post solutions if logged in and role == 'tutor'
+        allow create: if isAuthenticatedNonAnonymous()
+                      && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'tutor';
+        // Only signed-in users can read solutions
+        allow read: if isAuthenticatedNonAnonymous();
+        // Only authenticated users can rate a solution
+        allow update: if isAuthenticatedNonAnonymous()
+                      && request.resource.data.keys().hasAll(['rating', 'ratedBy', 'ratedAt'])
+                      && request.resource.data.ratedBy == request.auth.uid
+                      && request.resource.data.rating is number;
+
+        // Allow tutor or question owner to delete
+        allow delete: if isAuthenticatedNonAnonymous()
+               && (
+                    (resource.data.tutorId != null && resource.data.tutorId == request.auth.uid) ||
+                    (get(/databases/$(database)/documents/questions/$(questionId)).data.studentId == request.auth.uid)
+                  );
+      }
+    }
+
+    // Sessions collection: students create requests, tutors/students can read their sessions.
+    match /sessions/{sessionId} {
+      // Allow reading documents where you're the student or teacher
+      allow read: if isSignedIn() && (
+        resource.data.studentId == request.auth.uid || resource.data.teacherId == request.auth.uid
+      );
+
+      // Allow collection queries for signed-in users (Firestore will still filter by document rules)
+      // This permits querying the collection, then document-level rules filter results
+      allow list: if isSignedIn();
+
+      // Allow students to create their own session requests. Basic validation only.
+      allow create: if isSignedIn()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.teacherId is string
+        && request.resource.data.domain is string
+        && request.resource.data.requestedTime is timestamp
+        && request.resource.data.durationMinutes is int
+        && request.resource.data.status == 'requested';
+
+      // Allow updates by involved parties (student or teacher)
+      // Use affectedKeys() to check only the fields being changed, not the entire document
+      allow update: if isSignedIn() && (
+        request.auth.uid == resource.data.teacherId || request.auth.uid == resource.data.studentId
+      ) && (
+        // Only allow modifying these specific fields
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'rescheduleProposedTime', 'rescheduleProposedBy', 'rejectedBy', 'updatedAt', 
+          'requestedTime', 'message', 'videoSessionStartedAt', 'videoSessionEndedAt', 'videoRoomId'
+        ])
+        // Additional validation for reschedule proposals
+        && (
+          // If not modifying rescheduleProposedBy, allow the update
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['rescheduleProposedBy'])
+          // If modifying rescheduleProposedBy, ensure it matches the caller's role
+          || (
+            (request.auth.uid == resource.data.studentId && request.resource.data.rescheduleProposedBy == 'student')
+            || (request.auth.uid == resource.data.teacherId && request.resource.data.rescheduleProposedBy == 'teacher')
+          )
+        )
+        // Additional validation for rejectedBy
+        && (
+          // If not modifying rejectedBy, allow the update
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['rejectedBy'])
+          // If modifying rejectedBy, ensure it matches the caller's role
+          || (
+            (request.auth.uid == resource.data.studentId && request.resource.data.rejectedBy == 'student')
+            || (request.auth.uid == resource.data.teacherId && request.resource.data.rejectedBy == 'teacher')
+          )
+        )
+        // Video session status transitions validation
+        && (
+          // If not modifying status, allow
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
+          // If modifying status, only allow valid transitions
+          || (
+            // requested -> confirmed (when tutor accepts)
+            (resource.data.status == 'requested' && request.resource.data.status == 'confirmed')
+            // requested -> rejected (when tutor/student rejects)
+            || (resource.data.status == 'requested' && request.resource.data.status == 'rejected')
+            // requested -> reschedule_pending (when tutor/student proposes reschedule)
+            || (resource.data.status == 'requested' && request.resource.data.status == 'reschedule_pending')
+            // reschedule_pending -> confirmed (when accepting proposed reschedule)
+            || (resource.data.status == 'reschedule_pending' && request.resource.data.status == 'confirmed')
+            // reschedule_pending -> rejected (when rejecting proposed reschedule)
+            || (resource.data.status == 'reschedule_pending' && request.resource.data.status == 'rejected')
+            // reschedule_pending -> reschedule_pending (when counter-proposing)
+            || (resource.data.status == 'reschedule_pending' && request.resource.data.status == 'reschedule_pending')
+            // confirmed -> in_progress (when someone joins)
+            || (resource.data.status == 'confirmed' && request.resource.data.status == 'in_progress')
+            // in_progress -> completed (when session ends)
+            || (resource.data.status == 'in_progress' && request.resource.data.status == 'completed')
+          )
+        )
+      );
+
+      // Deletion only by the student who created it
+      allow delete: if isSignedIn() && resource.data.studentId == request.auth.uid;
+    }
+
+    // Confirmed sessions: only server-side (admin SDK) should write here. Clients can read if involved.
+    match /confirmed_sessions/{id} {
+      allow read: if isSignedIn() && (
+        resource.data.studentId == request.auth.uid || resource.data.teacherId == request.auth.uid
+      );
+      // Disallow client writes; Cloud Functions using admin SDK bypass rules
+      allow create, update, delete: if false;
+    }
+
+    // Notifications: users can read/write their own notifications
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Allow creating notifications (for self or others - needed for session notifications)
+      allow create: if isSignedIn();
+      // Only the recipient can update/delete their notifications
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // teacher_calendar etc. should be written by server only; deny client writes
+    match /teacher_calendar/{doc} {
+      allow read: if isSignedIn() && (
+        resource.data.teacherId == request.auth.uid || resource.data.studentId == request.auth.uid
+      );
+      allow create, update, delete: if false;
+    }
+
+    // keep existing or other collections open for now
+  }
+}

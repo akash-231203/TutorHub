@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LearnAndEarn"
+rootProject.name = "TutorHub"
 include(":app")
  
