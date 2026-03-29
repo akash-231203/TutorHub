@@ -1,8 +1,83 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
+}
+
+fun loadDotEnv(path: java.io.File): Properties {
+    val props = Properties()
+    if (!path.exists()) return props
+
+    path.forEachLine { rawLine ->
+        val line = rawLine.trim()
+        if (line.isEmpty() || line.startsWith("#")) return@forEachLine
+        val idx = line.indexOf('=')
+        if (idx <= 0) return@forEachLine
+
+        val key = line.substring(0, idx).trim()
+        var value = line.substring(idx + 1).trim()
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+            value = value.substring(1, value.length - 1)
+        }
+        if (key.isNotEmpty()) props.setProperty(key, value)
+    }
+    return props
+}
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+val dotEnv = loadDotEnv(rootProject.file(".env"))
+
+fun secret(name: String): String? =
+    System.getenv(name)
+        ?: dotEnv.getProperty(name)
+        ?: localProperties.getProperty(name)
+
+val googleServicesTemplate = project.file("google-services.template.json")
+val googleServicesOutput = project.file("google-services.json")
+
+val generateGoogleServicesJson = tasks.register("generateGoogleServicesJson") {
+    group = "build setup"
+    description = "Generates app/google-services.json from google-services.template.json using env/.env/local.properties."
+
+    inputs.file(googleServicesTemplate)
+    outputs.file(googleServicesOutput)
+
+    doLast {
+        if (!googleServicesTemplate.exists()) {
+            throw GradleException("Missing ${googleServicesTemplate.path}. Expected a template file.")
+        }
+
+        val apiKey = secret("GOOGLE_SERVICES_CURRENT_KEY")
+        if (apiKey.isNullOrBlank()) {
+            throw GradleException(
+                "Missing GOOGLE_SERVICES_CURRENT_KEY. Set it in environment variables, .env (repo root), or local.properties."
+            )
+        }
+
+        val templateText = googleServicesTemplate.readText(Charsets.UTF_8)
+        val rendered = templateText.replace("__GOOGLE_SERVICES_CURRENT_KEY__", apiKey)
+
+        if (rendered.contains("__GOOGLE_SERVICES_CURRENT_KEY__")) {
+            throw GradleException("Failed to render google-services.json: placeholder was not replaced.")
+        }
+
+        googleServicesOutput.writeText(rendered, Charsets.UTF_8)
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(generateGoogleServicesJson)
+}
+
+tasks.matching { it.name.startsWith("process") && it.name.endsWith("GoogleServices") }.configureEach {
+    dependsOn(generateGoogleServicesJson)
 }
 
 android {
@@ -19,18 +94,36 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val releaseStoreFilePath = secret("RELEASE_STORE_FILE")
+    val releaseStorePassword = secret("RELEASE_STORE_PASSWORD")
+    val releaseKeyAlias = secret("RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = secret("RELEASE_KEY_PASSWORD")
+
     signingConfigs {
-        create("release") {
-            storeFile = file("../release-key.jks")
-            storePassword = "Akash2312#"
-            keyAlias = "release"
-            keyPassword = "Akash2312#"
+        if (
+            !releaseStoreFilePath.isNullOrBlank() &&
+            !releaseStorePassword.isNullOrBlank() &&
+            !releaseKeyAlias.isNullOrBlank() &&
+            !releaseKeyPassword.isNullOrBlank()
+        ) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFilePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        } else {
+            logger.warn(
+                "Release signing is not configured. " +
+                    "Set RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD " +
+                    "in environment variables, .env, or local.properties."
+            )
         }
     }
 
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = false
             isShrinkResources = false
         }

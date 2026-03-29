@@ -13,3 +13,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Secrets / signing
+/.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+release-key.jks
+
+# Firebase Android config (generated from template)
+/app/google-services.json
