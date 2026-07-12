@@ -118,30 +118,52 @@ git clone https://github.com/akash-231203/TutorHub.git
 
 ## Screenshots
 
-<p align="center">
-  <img src="screenshots/Signup Page.jpg" width="250"/>
-  <img src="screenshots/Login Page.jpg" width="250"/>
-</p>
+<table align="center">
+  <tr>
+    <th>Sign Up</th>
+    <th>Login</th>
+  </tr>
+  <tr>
+    <td><img src="screenshots/Signup Page.jpg" width="250"/></td>
+    <td><img src="screenshots/Login Page.jpg" width="250"/></td>
+  </tr>
 
-<p align="center">
-  <img src="screenshots/Student Dashboard.jpg" width="250"/>
-  <img src="screenshots/Tutor Dashboard.jpg" width="250"/>
-</p>
+  <tr>
+    <th>Student Dashboard</th>
+    <th>Tutor Dashboard</th>
+  </tr>
+  <tr>
+    <td><img src="screenshots/Student Dashboard.jpg" width="250"/></td>
+    <td><img src="screenshots/Tutor Dashboard.jpg" width="250"/></td>
+  </tr>
 
-<p align="center">
-  <img src="screenshots/Question Posting Screen.jpg" width="250"/>
-  <img src="screenshots/Request Session Page.jpg" width="250"/>
-</p>
+  <tr>
+    <th>Question Posting</th>
+    <th>Request Session</th>
+  </tr>
+  <tr>
+    <td><img src="screenshots/Question Posting Screen.jpg" width="250"/></td>
+    <td><img src="screenshots/Request Session Page.jpg" width="250"/></td>
+  </tr>
 
-<p align="center">
-  <img src="screenshots/Session Requests (Student).jpg" width="250"/>
-  <img src="screenshots/Session Requests (Tutor).jpg" width="250"/>
-</p>
+  <tr>
+    <th>Student Session Requests</th>
+    <th>Tutor Session Details</th>
+  </tr>
+  <tr>
+    <td><img src="screenshots/Session Requests (Student).jpg" width="250"/></td>
+    <td><img src="screenshots/Session Requests (Tutor).jpg" width="250"/></td>
+  </tr>
 
-<p align="center">
-  <img src="screenshots/Domain Discovery.jpg" width="250"/>
-  <img src="screenshots/Tutor Discovery.jpg" width="250"/>
-</p>
+  <tr>
+    <th>Domain Discovery</th>
+    <th>Tutor Discovery</th>
+  </tr>
+  <tr>
+    <td><img src="screenshots/Domain Discovery.jpg" width="250"/></td>
+    <td><img src="screenshots/Tutor Discovery.jpg" width="250"/></td>
+  </tr>
+</table>
 
 ---
 
